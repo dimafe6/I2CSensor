@@ -16,13 +16,13 @@
 #define PROG_PIN 2
 #define RADIO_CE 9
 #define RADIO_CSN 10
-#define RF_PWR 5
+#define RF_PWR PD5
 #define SENSOR_PWR 4
 #define CONFIG_LED A1
 #define STATUS_LED A2
 
-char const *power_names[4] {"MIN", "LOW", "HIGH", "MAX"};
-char const *speed_names[3] {"1MBPS", "2MBPS", "250KBPS"};
+char const *power_names[4]{"MIN", "LOW", "HIGH", "MAX"};
+char const *speed_names[3]{"1MBPS", "2MBPS", "250KBPS"};
 const uint64_t pipes[5] = {0xF0F0F0F0D2LL, 0xF0F0F0F0C3LL, 0xF0F0F0F0B4LL, 0xF0F0F0F0A5LL, 0xF0F0F0F096LL};
 
 RF24 radio(RADIO_CE, RADIO_CSN);
@@ -45,15 +45,21 @@ ExternalSensor data;
 
 void setup()
 {
-  pinMode(PROG_PIN, INPUT_PULLUP);
-  pinMode(RF_PWR, OUTPUT);
-  pinMode(SENSOR_PWR, OUTPUT);
-  pinMode(CONFIG_LED, OUTPUT);
-  pinMode(STATUS_LED, OUTPUT);
-  digitalWrite(RF_PWR, LOW);
-  digitalWrite(SENSOR_PWR, LOW);
-  digitalWrite(CONFIG_LED, LOW);
-  digitalWrite(STATUS_LED, LOW);
+  ADCSRA = 0;
+  power_adc_disable();
+
+  SPCR = 0;
+  power_spi_disable();
+
+  pinAsInputPullUp(PROG_PIN);
+  pinAsOutput(RF_PWR);
+  pinAsOutput(SENSOR_PWR);
+  pinAsOutput(CONFIG_LED);
+  pinAsOutput(STATUS_LED);
+  digitalLow(RF_PWR);
+  digitalLow(SENSOR_PWR);
+  digitalLow(CONFIG_LED);
+  digitalLow(STATUS_LED);
 
   from_node = EEPROM.read(EEPROM_NODE_ADDRESS);
   rf_channel = EEPROM.read(EEPROM_CHANNEL_ADDRESS);
@@ -72,14 +78,15 @@ void setup()
   Serial.begin(9600);
 #endif
 
-  if (digitalRead(PROG_PIN) == LOW || !configIsValid)
+  if (isLow(PROG_PIN) || !configIsValid)
   {
     Serial.begin(9600);
+    Serial.println("");
     Serial.println("Configuration mode");
 
-    digitalWrite(CONFIG_LED, HIGH);
+    digitalHigh(CONFIG_LED);
     configure();
-    digitalWrite(CONFIG_LED, LOW);
+    digitalLow(CONFIG_LED);
   }
   else
   {
@@ -87,18 +94,6 @@ void setup()
     printConfig();
 #endif
   }
-
-  //Disable ADC
-  ADCSRA = 0;
-
-  /*for (byte i = 0; i <= A5; i++)
-  {
-    // skip pins
-    if ((i >= 9 && i <= 14) || i == PROG_PIN || i == RF_PWR || i == SENSOR_PWR || i == CONFIG_LED || i == STATUS_LED)
-      continue;
-    pinMode(i, OUTPUT);
-    digitalWrite(i, LOW);
-  }*/
 }
 
 void loop()
@@ -110,7 +105,7 @@ void loop()
 
   enableStatusLED();
 
-  digitalWrite(SENSOR_PWR, HIGH);
+  digitalHigh(SENSOR_PWR);
 
   Wire.begin();
 
@@ -122,71 +117,89 @@ void loop()
     Serial.println("BME280 sensor connect failed");
 #endif
 
-    //TODO: Show error into LED
+    data.temperature = 0;
+    data.humidity = 0;
+
+    for (byte i = 0; i <= 3; i++)
+    {
+      enableStatusLED();
+      delay(200);
+      disableStatusLED();
+      delay(200);
+    }
+
+    Wire.end();
+    digitalLow(SENSOR_PWR);
+
+    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
   }
+  else
+  {
+    bme280.setFilter(2);
+    bme280.setTempOverSample(2);
+    bme280.setPressureOverSample(2);
+    bme280.setHumidityOverSample(2);
+    bme280.setMode(MODE_FORCED);
 
-  bme280.setFilter(2);
-  bme280.setTempOverSample(2);
-  bme280.setPressureOverSample(2);
-  bme280.setHumidityOverSample(2);
-  bme280.setMode(MODE_FORCED);
+    data.temperature = bme280.readTempC() * 100;
+    data.humidity = bme280.readFloatHumidity() * 100;
 
-  data.temperature = bme280.readTempC() * 100;
-  data.humidity = bme280.readFloatHumidity() * 100;
+    Wire.end();
+    digitalLow(SENSOR_PWR);
 
-  Wire.end();
+    disableStatusLED();
 
-  digitalWrite(SENSOR_PWR, LOW);
-  digitalWrite(RF_PWR, HIGH);
+    digitalHigh(RF_PWR);
+    power_spi_enable();
+    SPCR = 1;
 
-  radio.begin();
-  radio.powerUp();
-  radio.stopListening();
-  radio.setAutoAck(false);
-  radio.setChannel(rf_channel);
-  radio.setPayloadSize(4);
-  radio.setPALevel(rf24_pa_dbm_e(rf_power));
-  radio.setDataRate(rf24_datarate_e(rf_speed));
-  radio.disableCRC();
-  radio.openWritingPipe(pipes[from_node - 1]);
+    radio.begin();
+    radio.powerUp();
+    radio.stopListening();
+    radio.setAutoAck(false);
+    radio.setChannel(rf_channel);
+    radio.setPayloadSize(4);
+    radio.setPALevel(rf24_pa_dbm_e(rf_power));
+    radio.setDataRate(rf24_datarate_e(rf_speed));
+    radio.disableCRC();
+    radio.openWritingPipe(pipes[from_node - 1]);
 
 #ifdef DEBUG
-  Serial.print("Humidity: ");
-  Serial.print(data.humidity);
-  Serial.println();
+    Serial.print("Humidity: ");
+    Serial.print(data.humidity);
+    Serial.println();
 
-  Serial.print("Temp: ");
-  Serial.print(data.temperature);
-  Serial.println();
-  Serial.println(radio.isChipConnected());
-
+    Serial.print("Temp: ");
+    Serial.print(data.temperature);
+    Serial.println();
+    Serial.println(radio.isChipConnected());
 #endif
 
-  radio.write(&data, sizeof(data));
+    radio.write(&data, sizeof(data));
 
-  radio.flush_rx();
-  radio.flush_tx();
-  SPI.end();
-  radio.powerDown();  
+    radio.powerDown();
+    digitalLow(RF_PWR);
 
-  digitalLow(RF_PWR);
-  
+    disableStatusLED();
+
 #ifdef DEBUG
-  Serial.print("Running time(ms): ");
-  Serial.println(millis() - startTime);
-  Serial.println("Going to sleep");
-  delay(1000); // Delay for complete Serial write
+    Serial.print("Running time(ms): ");
+    Serial.println(millis() - startTime);
+    Serial.println("Going to sleep");
+    delay(1000); // Delay for complete Serial write
 #endif
-
-  disableStatusLED();
-
-  LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-
-  /* unsigned int sleepCounter;
+    unsigned int sleepCounter;
     for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
     {
-     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
-    }*/
+      LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+    }
+
+    ADCSRA = 0;
+    power_adc_disable();
+
+    SPCR = 0;
+    power_spi_disable();
+  }
 }
 
 void configure()
@@ -345,13 +358,14 @@ void printConfig()
   Serial.print("Status LED: ");
   Serial.print((status_led_enabled == 1) ? "Enabled" : "Disabled");
   Serial.println();
+  delay(1000);
 }
 
 void enableStatusLED()
 {
   if (status_led_enabled)
   {
-    digitalWrite(STATUS_LED, HIGH);
+    digitalHigh(STATUS_LED);
   }
 }
 
@@ -359,6 +373,6 @@ void disableStatusLED()
 {
   if (status_led_enabled)
   {
-    digitalWrite(STATUS_LED, LOW);
+    digitalLow(STATUS_LED);
   }
 }
