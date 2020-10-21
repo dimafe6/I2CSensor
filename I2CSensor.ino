@@ -42,22 +42,23 @@ byte status_led_enabled = 1;
 byte bme_filter = 2;
 byte bme_temp_oversample = 2;
 byte bme_hum_oversample = 2;
+uint16_t battery_min_voltage = 2000;
+uint16_t battery_max_voltage = 3600;
 
 struct ExternalSensor
 {
   signed int temperature;
   signed int humidity;
+  byte battery;
 };
 
 ExternalSensor data;
 
 void setup()
 {
-  ADCSRA = 0;
-  power_adc_disable();
-
-  SPCR = 0;
-  power_spi_disable();
+  disableADC();
+  disableSPI();
+  disableTWI();
 
   pinAsInputPullUp(PROG_PIN);
   pinAsOutput(RF_PWR);
@@ -96,6 +97,12 @@ void setup()
   {
     Serial.begin(9600);
     Serial.println("");
+
+    if (!configIsValid)
+    {
+      Serial.println(F("Wrong configuration!"));
+    }
+
     Serial.println(F("Configuration mode"));
 
     digitalHigh(CONFIG_LED);
@@ -117,14 +124,16 @@ void loop()
   unsigned long startTime = millis();
 #endif
 
+  enableADC();
+  data.battery = getBatteryPercent();
+  disableADC();
+
   enableStatusLED();
 
   digitalHigh(SENSOR_PWR);
-
-  Wire.begin();
+  enableTWI();
 
   bme280.setI2CAddress(0x76);
-
   if (bme280.beginI2C() == false)
   {
 #ifdef DEBUG
@@ -133,6 +142,7 @@ void loop()
 
     data.temperature = 0;
     data.humidity = 0;
+    data.battery = 0;
 
     for (byte i = 0; i <= 3; i++)
     {
@@ -142,8 +152,8 @@ void loop()
       delay(200);
     }
 
-    Wire.end();
     digitalLow(SENSOR_PWR);
+    disableStatusLED();
 
     LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
   }
@@ -158,25 +168,28 @@ void loop()
     data.temperature = bme280.readTempC() * 100;
     data.humidity = bme280.readFloatHumidity() * 100;
 
-    Wire.end();
+    disableTWI();
     digitalLow(SENSOR_PWR);
 
-    disableStatusLED();
-
     digitalHigh(RF_PWR);
-    power_spi_enable();
-    SPCR = 1;
+    enableSPI();
 
     radio.begin();
     radio.powerUp();
     radio.stopListening();
     radio.setAutoAck(false);
     radio.setChannel(rf_channel);
-    radio.setPayloadSize(4);
+    radio.setPayloadSize(5);
     radio.setPALevel(rf24_pa_dbm_e(rf_power));
     radio.setDataRate(rf24_datarate_e(rf_speed));
     radio.disableCRC();
     radio.openWritingPipe(pipes[from_node - 1]);
+
+    radio.write(&data, sizeof(data));
+
+    radio.powerDown();
+    digitalLow(RF_PWR);
+    disableStatusLED();
 
 #ifdef DEBUG
     Serial.print(F("Humidity: "));
@@ -186,34 +199,26 @@ void loop()
     Serial.print(F("Temp: "));
     Serial.print(data.temperature);
     Serial.println();
-    Serial.println(radio.isChipConnected());
-#endif
 
-    radio.write(&data, sizeof(data));
+    Serial.print(F("Bat: "));
+    Serial.print(data.battery);
+    Serial.print('%');
+    Serial.println();
 
-    radio.powerDown();
-    digitalLow(RF_PWR);
-
-    disableStatusLED();
-
-#ifdef DEBUG
     Serial.print(F("Running time(ms): "));
     Serial.println(millis() - startTime);
     Serial.println(F("Going to sleep"));
     delay(1000); // Delay for complete Serial write
 #endif
+
     unsigned int sleepCounter;
     for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
     {
       LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
     }
-
-    ADCSRA = 0;
-    power_adc_disable();
-
-    SPCR = 0;
-    power_spi_disable();
   }
+
+  disableADC();
 }
 
 void configure()
@@ -485,4 +490,65 @@ void disableStatusLED()
   {
     digitalLow(STATUS_LED);
   }
+}
+
+uint16_t readVcc()
+{
+  ADMUX = _BV(REFS0) | _BV(MUX3) | _BV(MUX2) | _BV(MUX1);
+
+  delay(2);
+  ADCSRA |= _BV(ADSC);
+  while (bit_is_set(ADCSRA, ADSC))
+    ;
+
+  uint8_t low = ADCL;
+  uint8_t high = ADCH;
+
+  uint16_t result = (high << 8) | low;
+
+  return 1108352L / result;
+}
+
+uint8_t getBatteryPercent()
+{
+  float batteryV = readVcc();
+  int batteryPcnt = (((batteryV - battery_min_voltage) / (battery_max_voltage - battery_min_voltage)) * 100);
+
+  return constrain(batteryPcnt, 0, 100);
+}
+
+void disableADC()
+{
+  ADCSRA = 0;
+  power_adc_disable();
+}
+
+void enableADC()
+{
+  power_adc_enable();
+  ADCSRA |= 1 << ADEN;
+}
+
+void enableSPI()
+{
+  power_spi_enable();
+}
+
+void disableSPI()
+{
+  SPCR &= ~_BV(SPE);
+  power_spi_disable();
+}
+
+void enableTWI()
+{
+  power_twi_enable();
+}
+
+void disableTWI()
+{
+  power_twi_disable();
+  TWCR &= ~(_BV(TWEN) | _BV(TWIE) | _BV(TWEA));
+  digitalLow(SDA);
+  digitalLow(SCL);
 }
