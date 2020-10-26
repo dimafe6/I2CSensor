@@ -1,9 +1,9 @@
-#include <EEPROM.h>
+#include <avr/wdt.h>
+#include <avr/sleep.h>
+#include <avr/power.h>
+#include <avr/eeprom.h>
 #include "./src/RF24.h"
 #include "./src/BME280.h"
-#include "LowPower.h"
-#include <avr/power.h>
-#include "./src/GPIO.h"
 
 //#define DEBUG
 
@@ -35,15 +35,15 @@ RF24 radio(RADIO_CE, RADIO_CSN);
 BME280 bme280;
 SensorCalibration calibration;
 
-uint8_t from_node = 1;
-uint8_t rf_channel = 80;
-uint8_t rf_speed = 0;
-uint8_t rf_power = 2;
-uint8_t sleep_8s_count = 1;
-uint8_t status_led_enabled = 1;
-uint8_t bme_filter = 2;
-uint8_t bme_temp_oversample = 2;
-uint8_t bme_hum_oversample = 2;
+uint8_t from_node;
+uint8_t rf_channel;
+uint8_t rf_speed;
+uint8_t rf_power;
+uint8_t sleep_8s_count;
+uint8_t status_led_enabled;
+uint8_t bme_filter;
+uint8_t bme_temp_oversample;
+uint8_t bme_hum_oversample;
 uint16_t battery_min_voltage = 2000;
 uint16_t battery_max_voltage = 3600;
 
@@ -72,15 +72,15 @@ void setup()
   digitalLow(CONFIG_LED);
   digitalLow(STATUS_LED);
 
-  from_node = EEPROM.read(EEPROM_NODE_ADDRESS);
-  rf_channel = EEPROM.read(EEPROM_CHANNEL_ADDRESS);
-  rf_speed = EEPROM.read(EEPROM_SPEED_ADDRESS);
-  rf_power = EEPROM.read(EEPROM_POWER_ADDRESS);
-  sleep_8s_count = EEPROM.read(EEPROM_SLEEP_TIME_ADDRESS);
-  status_led_enabled = EEPROM.read(EEPROM_ENABLE_STATUS_LED_ADDRESS);
-  bme_filter = EEPROM.read(EEPROM_BME_FILTER_ADDRESS);
-  bme_temp_oversample = EEPROM.read(EEPROM_BME_TEMP_OVERSAMPLE_ADDRESS);
-  bme_hum_oversample = EEPROM.read(EEPROM_BME_HUM_OVERSAMPLE_ADDRESS);
+  from_node = eeprom_read_byte((uint8_t *)EEPROM_NODE_ADDRESS);
+  rf_channel = eeprom_read_byte((uint8_t *)EEPROM_CHANNEL_ADDRESS);
+  rf_speed = eeprom_read_byte((uint8_t *)EEPROM_SPEED_ADDRESS);
+  rf_power = eeprom_read_byte((uint8_t *)EEPROM_POWER_ADDRESS);
+  sleep_8s_count = eeprom_read_byte((uint8_t *)EEPROM_SLEEP_TIME_ADDRESS);
+  status_led_enabled = eeprom_read_byte((uint8_t *)EEPROM_ENABLE_STATUS_LED_ADDRESS);
+  bme_filter = eeprom_read_byte((uint8_t *)EEPROM_BME_FILTER_ADDRESS);
+  bme_temp_oversample = eeprom_read_byte((uint8_t *)EEPROM_BME_TEMP_OVERSAMPLE_ADDRESS);
+  bme_hum_oversample = eeprom_read_byte((uint8_t *)EEPROM_BME_HUM_OVERSAMPLE_ADDRESS);
 
   bool configIsValid = (from_node >= 1 && from_node <= 5) &&
                        (rf_channel >= 1 && rf_channel <= 125) &&
@@ -166,7 +166,7 @@ void loop()
     digitalLow(SENSOR_PWR);
     disableStatusLED();
 
-    LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+    powerDown();
   }
   else
   {
@@ -229,11 +229,9 @@ void loop()
     unsigned int sleepCounter;
     for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
     {
-      LowPower.powerDown(SLEEP_8S, ADC_OFF, BOD_OFF);
+      powerDown();
     }
   }
-
-  disableADC();
 }
 
 void configure()
@@ -253,7 +251,7 @@ void configure()
 
     if (from_node >= 1 && from_node <= 5)
     {
-      EEPROM.write(EEPROM_NODE_ADDRESS, from_node);
+      eeprom_write_byte((uint8_t *)EEPROM_NODE_ADDRESS, from_node);
       Serial.println(from_node);
       break;
     }
@@ -273,7 +271,7 @@ void configure()
 
     if (rf_channel >= 1 && rf_channel <= 125)
     {
-      EEPROM.write(EEPROM_CHANNEL_ADDRESS, rf_channel);
+      eeprom_write_byte((uint8_t *)EEPROM_CHANNEL_ADDRESS, rf_channel);
       Serial.println(rf_channel);
       break;
     }
@@ -294,7 +292,7 @@ void configure()
 
     if (rf_speed >= 0 && rf_speed <= 2)
     {
-      EEPROM.write(EEPROM_SPEED_ADDRESS, rf_speed);
+      eeprom_write_byte((uint8_t *)EEPROM_SPEED_ADDRESS, rf_speed);
       Serial.println(rf_speed);
       break;
     }
@@ -315,7 +313,7 @@ void configure()
 
     if (rf_power >= 0 && rf_speed <= 3)
     {
-      EEPROM.write(EEPROM_POWER_ADDRESS, rf_power);
+      eeprom_write_byte((uint8_t *)EEPROM_POWER_ADDRESS, rf_power);
       Serial.println(rf_power);
       break;
     }
@@ -336,7 +334,7 @@ void configure()
 
     if (bme_filter >= 0 && bme_filter <= 4)
     {
-      EEPROM.write(EEPROM_BME_FILTER_ADDRESS, bme_filter);
+      eeprom_write_byte((uint8_t *)EEPROM_BME_FILTER_ADDRESS, bme_filter);
       Serial.println(bme_filter);
       break;
     }
@@ -357,7 +355,7 @@ void configure()
 
     if (bme_temp_oversample >= 0 && bme_temp_oversample <= 5)
     {
-      EEPROM.write(EEPROM_BME_TEMP_OVERSAMPLE_ADDRESS, bme_temp_oversample);
+      eeprom_write_byte((uint8_t *)EEPROM_BME_TEMP_OVERSAMPLE_ADDRESS, bme_temp_oversample);
       Serial.println(bme_temp_oversample);
       break;
     }
@@ -378,7 +376,7 @@ void configure()
 
     if (bme_hum_oversample >= 0 && bme_hum_oversample <= 5)
     {
-      EEPROM.write(EEPROM_BME_HUM_OVERSAMPLE_ADDRESS, bme_hum_oversample);
+      eeprom_write_byte((uint8_t *)EEPROM_BME_HUM_OVERSAMPLE_ADDRESS, bme_hum_oversample);
       Serial.println(bme_hum_oversample);
       break;
     }
@@ -400,7 +398,7 @@ void configure()
     if (sleep_time >= 8 && sleep_time <= 432000 && (sleep_time % 8) == 0)
     {
       sleep_8s_count = sleep_time / 8;
-      EEPROM.write(EEPROM_SLEEP_TIME_ADDRESS, sleep_8s_count);
+      eeprom_write_byte((uint8_t *)EEPROM_SLEEP_TIME_ADDRESS, sleep_8s_count);
       Serial.println(sleep_time);
       break;
     }
@@ -421,7 +419,7 @@ void configure()
 
     if (status_led_enabled >= 0 && status_led_enabled < 2)
     {
-      EEPROM.write(EEPROM_ENABLE_STATUS_LED_ADDRESS, status_led_enabled);
+      eeprom_write_byte((uint8_t *)EEPROM_ENABLE_STATUS_LED_ADDRESS, status_led_enabled);
       Serial.println((status_led_enabled == 1) ? F("Enabled") : F("Disabled"));
       break;
     }
@@ -566,4 +564,31 @@ void disableTWI()
   TWCR &= ~(_BV(TWEN) | _BV(TWIE) | _BV(TWEA));
   digitalLow(SDA);
   digitalLow(SCL);
+}
+
+void powerDown()
+{
+  disableADC();
+
+  wdt_enable(WDTO_8S);
+  WDTCSR |= (1 << WDIE);
+
+  do
+  {
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+    cli();
+    sleep_enable();
+    sleep_bod_disable();
+    sei();
+    sleep_cpu();
+    sleep_disable();
+    sei();
+  } while (0);
+
+  disableADC();
+}
+
+ISR (WDT_vect)
+{
+	wdt_disable();
 }

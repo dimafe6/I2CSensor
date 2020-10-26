@@ -1,6 +1,5 @@
 #ifndef __GPIO_H__
 #define __GPIO_H__
-#endif
 
 #define portOfPin(P) \
   (((P) >= 0 && (P) < 8) ? &PORTD : (((P) > 7 && (P) < 14) ? &PORTB : &PORTC))
@@ -22,3 +21,5 @@
 #define isHigh(P) ((*(pinOfPin(P)) & pinMask(P)) > 0)
 #define isLow(P) ((*(pinOfPin(P)) & pinMask(P)) == 0)
 #define digitalState(P) ((uint8_t)isHigh(P))
+
+#endif

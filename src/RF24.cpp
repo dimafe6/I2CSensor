@@ -69,14 +69,7 @@ void RF24::csn(bool mode)
 #endif // defined(RF24_RPi)
 
 #if !defined(RF24_LINUX)
-    if (mode)
-    {
-        digitalHigh(csn_pin);
-    }
-    else
-    {
-        digitalLow(csn_pin);
-    }
+    setDigitalState(csn_pin, mode)
     delayMicroseconds(csDelay);
 #endif // !defined(RF24_LINUX)
 }
@@ -88,14 +81,7 @@ void RF24::ce(bool level)
     //Allow for 3-pin use on ATTiny
     if (ce_pin != csn_pin)
     {
-        if (level)
-        {
-            digitalHigh(ce_pin);
-        }
-        else
-        {
-            digitalLow(ce_pin);
-        }
+        setDigitalState(ce_pin, level)
     }
 }
 
@@ -610,9 +596,6 @@ bool RF24::begin(void)
     _SPI.begin();
     ce(LOW);
     csn(HIGH);
-#if defined(__ARDUINO_X86__)
-    delay(100);
-#endif
 
     // Must allow the radio time to settle else configuration bits will not necessarily stick.
     // This is actually only required following power up but some settling time also appears to
@@ -621,15 +604,6 @@ bool RF24::begin(void)
     // Technically we require 4.5ms + 14us as a worst case. We'll just call it 5ms for good measure.
     // WARNING: Delay is based on P-variant whereby non-P *may* require different timing.
     delay(5);
-
-    // Set 1500uS (minimum for 32B payload in ESB@250KBPS) timeouts, to make testing a little easier
-    // WARNING: If this is ever lowered, either 250KBS mode with AA is broken or maximum packet
-    // sizes must never be used. See documentation for a more complete explanation.
-    setRetries(5, 15);
-
-    // Then set the data rate to the slowest (and most reliable) speed supported by all
-    // hardware.
-    setDataRate(RF24_1MBPS);
 
     // Disable dynamic payloads, to match dynamic_payloads_enabled setting - Reset value is 0
     toggle_features();
@@ -642,11 +616,6 @@ bool RF24::begin(void)
     // Notice reset and flush is the last thing we do
     write_register(NRF_STATUS, _BV(RX_DR) | _BV(TX_DS) | _BV(MAX_RT));
 
-    // Set up default configuration.  Callers can always change it later.
-    // This channel should be universally safe and not bleed over into adjacent
-    // spectrum.
-    setChannel(76);
-
     // Flush buffers
     flush_rx();
     flush_tx();
@@ -655,12 +624,8 @@ bool RF24::begin(void)
     // Do not write CE high so radio will remain in standby I mode
     // PTX should use only 22uA of power
     write_register(NRF_CONFIG, (_BV(EN_CRC) | _BV(CRCO)));
-    config_reg = read_register(NRF_CONFIG);
 
-    powerUp();
-
-    // if config is not set correctly then there was a bad response from module
-    return config_reg == (_BV(EN_CRC) | _BV(CRCO) | _BV(PWR_UP)) ? true : false;
+    return true;
 }
 
 bool RF24::beginlp(void)
