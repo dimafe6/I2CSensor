@@ -1,10 +1,11 @@
 #include <EEPROM.h>
-#include "RF24.h"
-#include <SparkFunBME280.h>
+#include "./src/RF24.h"
+#include "./src/BME280.h"
 #include "LowPower.h"
 #include <avr/power.h>
 #include "./src/GPIO.h"
-#define DEBUG
+
+//#define DEBUG
 
 #define EEPROM_NODE_ADDRESS 0
 #define EEPROM_CHANNEL_ADDRESS 1
@@ -27,21 +28,22 @@
 const char *power_names[4] = {"MIN", "LOW", "HIGH", "MAX"};
 const char *speed_names[3] = {"1MBPS", "2MBPS", "250KBPS"};
 const uint64_t pipes[5] = {0xF0F0F0F0D2LL, 0xF0F0F0F0C3LL, 0xF0F0F0F0B4LL, 0xF0F0F0F0A5LL, 0xF0F0F0F096LL};
-const byte bme_oversample_map[6] PROGMEM = {0, 1, 2, 4, 8, 16};
-const byte bme_filter_map[5] PROGMEM = {0, 2, 4, 8, 16};
+const uint8_t bme_oversample_map[6] PROGMEM = {0, 1, 2, 4, 8, 16};
+const uint8_t bme_filter_map[5] PROGMEM = {0, 2, 4, 8, 16};
 
 RF24 radio(RADIO_CE, RADIO_CSN);
 BME280 bme280;
+SensorCalibration calibration;
 
-byte from_node = 1;
-byte rf_channel = 80;
-byte rf_speed = 0;
-byte rf_power = 2;
-byte sleep_8s_count = 1;
-byte status_led_enabled = 1;
-byte bme_filter = 2;
-byte bme_temp_oversample = 2;
-byte bme_hum_oversample = 2;
+uint8_t from_node = 1;
+uint8_t rf_channel = 80;
+uint8_t rf_speed = 0;
+uint8_t rf_power = 2;
+uint8_t sleep_8s_count = 1;
+uint8_t status_led_enabled = 1;
+uint8_t bme_filter = 2;
+uint8_t bme_temp_oversample = 2;
+uint8_t bme_hum_oversample = 2;
 uint16_t battery_min_voltage = 2000;
 uint16_t battery_max_voltage = 3600;
 
@@ -49,7 +51,7 @@ struct ExternalSensor
 {
   signed int temperature;
   signed int humidity;
-  byte battery;
+  uint8_t battery;
 };
 
 ExternalSensor data;
@@ -93,15 +95,23 @@ void setup()
   Serial.begin(9600);
 #endif
 
-  if (isLow(PROG_PIN) || !configIsValid)
+  if (!configIsValid)
+  {
+    from_node = 1;
+    rf_channel = 80;
+    rf_speed = 2;
+    rf_power = 3;
+    sleep_8s_count = 1;
+    status_led_enabled = 1;
+    bme_filter = 2;
+    bme_temp_oversample = 2;
+    bme_hum_oversample = 2;
+  }
+
+  if (isLow(PROG_PIN))
   {
     Serial.begin(9600);
     Serial.println("");
-
-    if (!configIsValid)
-    {
-      Serial.println(F("Wrong configuration!"));
-    }
 
     Serial.println(F("Configuration mode"));
 
@@ -133,8 +143,9 @@ void loop()
   digitalHigh(SENSOR_PWR);
   enableTWI();
 
-  bme280.setI2CAddress(0x76);
-  if (bme280.beginI2C() == false)
+  delay(2);
+
+  if (bme280.begin(0x76, &calibration) == false)
   {
 #ifdef DEBUG
     Serial.println(F("BME280 sensor connect failed"));
@@ -144,7 +155,7 @@ void loop()
     data.humidity = 0;
     data.battery = 0;
 
-    for (byte i = 0; i <= 3; i++)
+    for (uint8_t i = 0; i <= 3; i++)
     {
       enableStatusLED();
       delay(200);
@@ -161,9 +172,13 @@ void loop()
   {
     bme280.setFilter(pgm_read_byte(&bme_filter_map[bme_filter]));
     bme280.setTempOverSample(pgm_read_byte(&bme_oversample_map[bme_temp_oversample]));
-    bme280.setPressureOverSample(0);
     bme280.setHumidityOverSample(pgm_read_byte(&bme_oversample_map[bme_hum_oversample]));
     bme280.setMode(MODE_FORCED);
+
+    while (bme280.isMeasuring())
+    {
+      delay(1);
+    };
 
     data.temperature = bme280.readTempC() * 100;
     data.humidity = bme280.readFloatHumidity() * 100;
@@ -179,7 +194,7 @@ void loop()
     radio.stopListening();
     radio.setAutoAck(false);
     radio.setChannel(rf_channel);
-    radio.setPayloadSize(5);
+    radio.setPayloadSize(sizeof(data));
     radio.setPALevel(rf24_pa_dbm_e(rf_power));
     radio.setDataRate(rf24_datarate_e(rf_speed));
     radio.disableCRC();
@@ -234,7 +249,7 @@ void configure()
     while (!Serial.available())
       ;
 
-    from_node = Serial.readStringUntil('\n').toInt();
+    from_node = Serial.parseInt();
 
     if (from_node >= 1 && from_node <= 5)
     {
