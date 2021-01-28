@@ -2,7 +2,8 @@
 #include <avr/sleep.h>
 #include <avr/power.h>
 #include <avr/eeprom.h>
-#include "./src/RF24.h"
+#include "./src/GPIO.h"
+#include "RF24.h"
 #include "./src/BME280.h"
 #include "./src/config.h"
 
@@ -298,9 +299,8 @@ void loop()
     display.hibernate();
     display.powerOff();
 #endif
-  }
-
 #endif
+  }
 
 #ifdef DEBUG
   Serial.print(F("Running time(ms): "));
