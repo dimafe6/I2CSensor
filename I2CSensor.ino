@@ -4,32 +4,22 @@
 #include <avr/eeprom.h>
 #include "./src/RF24.h"
 #include "./src/BME280.h"
-
-//#define DEBUG
-
-#define EEPROM_NODE_ADDRESS 0
-#define EEPROM_CHANNEL_ADDRESS 1
-#define EEPROM_SPEED_ADDRESS 2
-#define EEPROM_POWER_ADDRESS 3
-#define EEPROM_SLEEP_TIME_ADDRESS 4
-#define EEPROM_ENABLE_STATUS_LED_ADDRESS 5
-#define EEPROM_BME_FILTER_ADDRESS 6
-#define EEPROM_BME_TEMP_OVERSAMPLE_ADDRESS 7
-#define EEPROM_BME_HUM_OVERSAMPLE_ADDRESS 8
-
-#define PROG_PIN 2
-#define RADIO_CE 9
-#define RADIO_CSN 10
-#define RF_PWR PD5
-#define SENSOR_PWR 4
-#define CONFIG_LED A1
-#define STATUS_LED A2
+#include "./src/config.h"
 
 const char *power_names[4] = {"MIN", "LOW", "HIGH", "MAX"};
 const char *speed_names[3] = {"1MBPS", "2MBPS", "250KBPS"};
 const uint64_t pipes[5] = {0xF0F0F0F0D2LL, 0xF0F0F0F0C3LL, 0xF0F0F0F0B4LL, 0xF0F0F0F0A5LL, 0xF0F0F0F096LL};
 const uint8_t bme_oversample_map[6] PROGMEM = {0, 1, 2, 4, 8, 16};
 const uint8_t bme_filter_map[5] PROGMEM = {0, 2, 4, 8, 16};
+
+const char strNodeId[] = "ID:";
+const char strChannel[] = "Channel:";
+const char strRadioSpeed[] = "Speed:";
+const char strRadioPower[] = "Power:";
+const char strWrongValue[] = "Wrong value!";
+const char strSleepTime[] = "Sleep:";
+const char strEnabled[] = "Enabled";
+const char strDisabled[] = "Disabled";
 
 RF24 radio(RADIO_CE, RADIO_CSN);
 BME280 bme280;
@@ -44,8 +34,16 @@ uint8_t status_led_enabled;
 uint8_t bme_filter;
 uint8_t bme_temp_oversample;
 uint8_t bme_hum_oversample;
-uint16_t battery_min_voltage = 2000;
-uint16_t battery_max_voltage = 3600;
+uint16_t battery_min_voltage = BATTERY_MIN_VOLTAGE;
+uint16_t battery_max_voltage = BATTERY_MAX_VOLTAGE;
+signed int prevTemp;
+signed int prevHum;
+uint8_t prevBat;
+
+#ifdef DISPLAY_MODE_PARTIAL_REDRAW
+bool displayInit = false;
+uint8_t displayUpdatesCount = 0;
+#endif
 
 struct ExternalSensor
 {
@@ -111,13 +109,35 @@ void setup()
   if (isLow(PROG_PIN))
   {
     Serial.begin(9600);
-    Serial.println("");
 
-    Serial.println(F("Configuration mode"));
+    Serial.println(F("\nConfiguration mode"));
 
     digitalHigh(CONFIG_LED);
+
+#ifdef ENABLE_DISPLAY
+    enableSPI();
+    digitalHigh(RF_PWR);
+    SPI.begin();
+    digitalLow(RADIO_CE);
+    digitalHigh(RADIO_CSN);
+    digitalLow(RF_PWR);
+
+#ifdef DEBUG
+    display.init(9600);
+#else
+    display.init();
+#endif
+    display.drawPaged(showConfigCallback, 0);
+#endif
+
+    // TODO: Add display rotation to config
     configure();
     digitalLow(CONFIG_LED);
+
+#ifdef ENABLE_DISPLAY
+    display.drawPaged(showConfigCallback, 0);
+    disableSPI();
+#endif
   }
   else
   {
@@ -135,6 +155,7 @@ void loop()
 #endif
 
   enableADC();
+  prevBat = data.battery;
   data.battery = getBatteryPercent();
   disableADC();
 
@@ -148,7 +169,7 @@ void loop()
   if (bme280.begin(0x76, &calibration) == false)
   {
 #ifdef DEBUG
-    Serial.println(F("BME280 sensor connect failed"));
+    Serial.println("Sensor connect failed");
 #endif
 
     data.temperature = 0;
@@ -180,14 +201,17 @@ void loop()
       delay(1);
     };
 
+    prevTemp = (int)(data.temperature / 100);
+    prevHum = (int)(data.humidity / 100);
+
     data.temperature = bme280.readTempC() * 100;
     data.humidity = bme280.readFloatHumidity() * 100;
 
     disableTWI();
     digitalLow(SENSOR_PWR);
 
-    digitalHigh(RF_PWR);
     enableSPI();
+    digitalHigh(RF_PWR);
 
     radio.begin();
     radio.powerUp();
@@ -207,7 +231,7 @@ void loop()
     disableStatusLED();
 
 #ifdef DEBUG
-    Serial.print(F("Humidity: "));
+    Serial.print(F("Hum: "));
     Serial.print(data.humidity);
     Serial.println();
 
@@ -219,20 +243,244 @@ void loop()
     Serial.print(data.battery);
     Serial.print('%');
     Serial.println();
-
-    Serial.print(F("Running time(ms): "));
-    Serial.println(millis() - startTime);
-    Serial.println(F("Going to sleep"));
-    delay(1000); // Delay for complete Serial write
 #endif
 
-    unsigned int sleepCounter;
-    for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
+#ifdef ENABLE_DISPLAY
+    bool tempChanged = prevTemp != (int)(data.temperature / 100);
+    bool humChanged = prevHum != (int)(data.humidity / 100);
+    bool batChanged = map(prevBat, 0, 100, 3, 28) != map(data.battery, 0, 100, 3, 28);
+
+#if defined(DISPLAY_MODE_FULL_REDRAW)
+    if (tempChanged || humChanged || batChanged)
     {
-      powerDown();
+      display.init();
+      display.drawPaged(showValuesCallback, 0);
+      display.hibernate();
+      digitalLow(DISPLAY_RST);
     }
+#elif defined(DISPLAY_MODE_PARTIAL_REDRAW)
+    if (!displayInit || (FULL_REDRAW_AFTER_UPDATES > 0 ? displayUpdatesCount >= FULL_REDRAW_AFTER_UPDATES : false))
+    {
+      display.init();
+      display.mirror(false);
+      display.setRotation(DISPLAY_ROTATION);
+      display.drawPaged(showGUICallback, 0);
+      display.setFont(&DSEG7_Classic_Bold_64);
+      displayInit = true;
+      displayUpdatesCount = 0;
+    }
+    else
+    {
+      if (tempChanged)
+      {
+        display.setPartialWindow(52, 20, 98, 70);
+        display.drawPaged(showTempBoxCallback, 0);
+      }
+
+      if (humChanged)
+      {
+        display.setPartialWindow(52, 120, 98, 70);
+        display.drawPaged(showHumBoxCallback, 0);
+      }
+
+      if (batChanged)
+      {
+        display.setPartialWindow(5, 175, 40, 24);
+        display.drawPaged(showBatBoxCallback, 0);
+      }
+
+      if (tempChanged || humChanged || batChanged)
+      {
+        displayUpdatesCount++;
+      }
+    }
+
+    display.hibernate();
+    display.powerOff();
+#endif
+  }
+
+#endif
+
+#ifdef DEBUG
+  Serial.print(F("Running time(ms): "));
+  Serial.println(millis() - startTime);
+  Serial.println(F("Sleep"));
+  delay(1000); // Delay for complete Serial write
+#endif
+
+  unsigned int sleepCounter;
+  for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
+  {
+    powerDown();
   }
 }
+
+#ifdef ENABLE_DISPLAY
+
+#ifdef DISPLAY_MODE_FULL_REDRAW
+void showValuesCallback(const void *parameters)
+{
+  display.fillScreen(GxEPD_BLACK);
+  display.setTextColor(GxEPD_WHITE);
+  display.mirror(false);
+
+  display.drawRect(0, 0, 200, 200, GxEPD_WHITE);
+  display.drawLine(0, 8, 22, 8, GxEPD_WHITE);
+  display.drawLine(178, 8, 200, 8, GxEPD_WHITE);
+
+  display.setFont(&DSEG7_Classic_Bold_64);
+  display.setCursor(48, 87);
+  display.print((int)(data.temperature / 100));
+
+  display.setCursor(48, 187);
+  display.print((int)(data.humidity / 100));
+
+  display.drawCircle(160, 35, 2, GxEPD_WHITE);
+  display.drawCircle(160, 35, 3, GxEPD_WHITE);
+  display.drawCircle(160, 35, 4, GxEPD_WHITE);
+
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(39, 15);
+
+  display.print(F("TEMPERATURE"));
+
+  display.setCursor(170, 50);
+  display.print('C');
+
+  display.drawLine(0, 108, 32, 108, GxEPD_WHITE);
+  display.drawLine(168, 108, 200, 108, GxEPD_WHITE);
+
+  display.setCursor(60, 115);
+  display.print(F("HUMIDITY"));
+
+  display.setFont(&percentFont);
+  display.setCursor(160, 145);
+  display.print('%');
+
+  display.drawLine(0, 175, 40, 175, GxEPD_WHITE);
+  display.drawRect(5, 182, 30, 12, GxEPD_WHITE);
+  display.fillRect(35, 185, 2, 6, GxEPD_WHITE);
+  display.fillRect(37, 187, 1, 2, GxEPD_WHITE);
+  display.fillRect(6, 184, (uint8_t)map(data.battery, 0, 100, 3, 28), 8, GxEPD_WHITE);
+  display.drawLine(40, 175, 60, 200, GxEPD_WHITE);
+
+  display.drawLine(160, 175, 200, 175, GxEPD_WHITE);
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(153, 193);
+  display.print(F("ID:"));
+  display.setCursor(184, 193);
+  display.print(from_node);
+  display.drawLine(160, 175, 140, 200, GxEPD_WHITE);
+}
+#endif
+
+#ifdef DISPLAY_MODE_PARTIAL_REDRAW
+void showGUICallback(const void *parameters)
+{
+  display.setTextColor(GxEPD_BLACK);
+  display.mirror(false);
+
+  display.drawRect(0, 0, 200, 200, GxEPD_BLACK);
+  display.drawLine(0, 8, 22, 8, GxEPD_BLACK);
+  display.drawLine(178, 8, 200, 8, GxEPD_BLACK);
+
+  display.setFont(&DSEG7_Classic_Bold_64);
+  display.setCursor(48, 87);
+  display.print((int)(data.temperature / 100));
+
+  display.setCursor(48, 187);
+  display.print((int)(data.humidity / 100));
+
+  display.drawCircle(160, 35, 2, GxEPD_BLACK);
+  display.drawCircle(160, 35, 3, GxEPD_BLACK);
+  display.drawCircle(160, 35, 4, GxEPD_BLACK);
+
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(39, 15);
+
+  display.print(F("TEMPERATURE"));
+
+  display.setCursor(170, 50);
+  display.print('C');
+
+  display.drawLine(0, 108, 32, 108, GxEPD_BLACK);
+  display.drawLine(168, 108, 200, 108, GxEPD_BLACK);
+
+  display.setCursor(60, 115);
+  display.print(F("HUMIDITY"));
+
+  display.setFont(&percentFont);
+  display.setCursor(160, 145);
+  display.print('%');
+
+  display.drawLine(0, 175, 40, 175, GxEPD_BLACK);
+  display.drawRect(5, 182, 30, 12, GxEPD_BLACK);
+  display.fillRect(35, 185, 2, 6, GxEPD_BLACK);
+  display.fillRect(37, 187, 1, 2, GxEPD_BLACK);
+  display.fillRect(6, 184, (uint8_t)map(data.battery, 0, 100, 3, 28), 8, GxEPD_BLACK);
+  display.drawLine(40, 175, 50, 200, GxEPD_BLACK);
+
+  display.drawLine(160, 175, 200, 175, GxEPD_BLACK);
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(157, 193);
+  display.print(F("ID:"));
+  display.setCursor(186, 193);
+  display.print(from_node);
+  display.drawLine(160, 175, 150, 200, GxEPD_BLACK);
+}
+
+void showTempBoxCallback(const void *parameters)
+{
+  display.setCursor(48, 87);
+  display.print((int)(data.temperature / 100));
+}
+
+void showHumBoxCallback(const void *parameters)
+{
+  display.setCursor(48, 187);
+  display.print((int)(data.humidity / 100));
+}
+
+void showBatBoxCallback(const void *parameters)
+{
+  display.drawLine(0, 175, 0, 200, GxEPD_BLACK);
+  display.drawLine(0, 175, 40, 175, GxEPD_BLACK);
+  display.drawRect(5, 182, 30, 12, GxEPD_BLACK);
+  display.fillRect(35, 185, 2, 6, GxEPD_BLACK);
+  display.fillRect(37, 187, 1, 2, GxEPD_BLACK);
+  display.fillRect(6, 184, (uint8_t)map(data.battery, 0, 100, 3, 28), 8, GxEPD_BLACK);
+  display.drawLine(40, 175, 50, 200, GxEPD_BLACK);
+}
+#endif
+
+void showConfigCallback(const void *parameters)
+{
+  display.setTextColor(GxEPD_BLACK);
+  display.mirror(false);
+  display.setFont(&FreeMonoBold9pt7b);
+  display.setCursor(0, 0);
+
+  display.println();
+
+  display.print(strNodeId);
+  display.println(from_node);
+
+  display.print(strChannel);
+  display.println(rf_channel);
+
+  display.print(strRadioSpeed);
+  display.println(speed_names[rf_speed]);
+
+  display.print(strRadioPower);
+  display.println(power_names[rf_power]);
+
+  display.print(strSleepTime);
+  display.print(sleep_8s_count * 8);
+  display.print(F("sec"));
+}
+
+#endif
 
 void configure()
 {
@@ -241,13 +489,15 @@ void configure()
     ; // wait for serial port to connect.
   }
 
+  Serial.flush();
+
   while (1)
   {
-    Serial.println(F("*** Enter node address (1-5):"));
+    Serial.println(F("*** Node address (1-5):"));
     while (!Serial.available())
       ;
 
-    from_node = Serial.parseInt();
+    from_node = Serial.readStringUntil('\n').toInt();
 
     if (from_node >= 1 && from_node <= 5)
     {
@@ -257,13 +507,13 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong node address"));
+      Serial.println(strWrongValue);
     }
   }
 
   while (1)
   {
-    Serial.println(F("*** Enter node channel id (1-125):"));
+    Serial.println(F("*** Node channel id (1-125):"));
     while (!Serial.available())
       ;
 
@@ -277,14 +527,13 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong channel id"));
+      Serial.println(strWrongValue);
     }
   }
 
   while (1)
   {
-    Serial.println(F("*** Select radio speed (0-2):"));
-    Serial.println(F("0 - 1MBPS\r\n1 - 2MBPS\r\n2 - 250KBPS"));
+    Serial.println(F("*** Radio speed (0-2):\n0 - 1MBPS\r\n1 - 2MBPS\r\n2 - 250KBPS"));
     while (!Serial.available())
       ;
 
@@ -298,13 +547,13 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong radio speed"));
+      Serial.println(strWrongValue);
     }
   }
 
   while (1)
   {
-    Serial.println(F("*** Select radio power (0-3):"));
+    Serial.println(F("*** Radio power (0-3):"));
     Serial.println(F("0 - MIN\r\n1 - LOW\r\n2 - HIGH\r\n3 - MAX"));
     while (!Serial.available())
       ;
@@ -319,14 +568,14 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong radio power"));
+      Serial.println(strWrongValue);
     }
   }
 
   while (1)
   {
-    Serial.println(F("*** Select BME280 filter level:"));
-    Serial.println(F("0 - Filter off\r\n1 - Coefficients 2\r\n2 - Coefficients 4\r\n3 - Coefficients 8\r\n4 - Coefficients 16"));
+    Serial.println(F("*** BME280 filter level:"));
+    Serial.println(F("0 - Disabled\r\n1 - 2x\r\n2 - 4x\r\n3 - 8x\r\n4 - 16x"));
     while (!Serial.available())
       ;
 
@@ -340,14 +589,14 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong BME280 filter level"));
+      Serial.println(strWrongValue);
     }
   }
 
   while (1)
   {
-    Serial.println(F("*** Select BME280 temperature oversample:"));
-    Serial.println(F("0 - Oversample disabled\r\n1 - Coefficients 1\r\n2 - Coefficients 2\r\n3 - Coefficients 4\r\n4 - Coefficients 8\r\n5 - Coefficients 16"));
+    Serial.println(F("*** BME280 temperature oversample:"));
+    Serial.println(F("0 - Disabled\r\n1 - 1x\r\n2 - 2x\r\n3 - 4x\r\n4 - 8x\r\n5 - 16x"));
     while (!Serial.available())
       ;
 
@@ -361,14 +610,14 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong BME280 temperature oversample"));
+      Serial.println(strWrongValue);
     }
   }
 
   while (1)
   {
     Serial.println(F("*** Select BME280 humidity oversample:"));
-    Serial.println(F("0 - Oversample disabled\r\n1 - Coefficients 1\r\n2 - Coefficients 2\r\n3 - Coefficients 4\r\n4 - Coefficients 8\r\n5 - Coefficients 16"));
+    Serial.println(F("0 - Disabled\r\n1 - 1x\r\n2 - 2x\r\n3 - 4x\r\n4 - 8x\r\n5 - 16x"));
     while (!Serial.available())
       ;
 
@@ -382,7 +631,7 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong BME280 humidity oversample"));
+      Serial.println(strWrongValue);
     }
   }
 
@@ -404,7 +653,7 @@ void configure()
     }
     else
     {
-      Serial.println(F("Wrong sleep time"));
+      Serial.println(strWrongValue);
     }
   }
 
@@ -420,12 +669,12 @@ void configure()
     if (status_led_enabled >= 0 && status_led_enabled < 2)
     {
       eeprom_write_byte((uint8_t *)EEPROM_ENABLE_STATUS_LED_ADDRESS, status_led_enabled);
-      Serial.println((status_led_enabled == 1) ? F("Enabled") : F("Disabled"));
+      Serial.println((status_led_enabled == 1) ? strEnabled : strDisabled);
       break;
     }
     else
     {
-      Serial.println(F("Wrong value. Enter 0 or 1"));
+      Serial.println(strWrongValue);
     }
   }
 
@@ -435,56 +684,56 @@ void configure()
 void printConfig()
 {
   Serial.println();
-  Serial.print(F("Node address: "));
+  Serial.print(strNodeId);
   Serial.print(from_node);
   Serial.println();
-  Serial.print(F("Channel: "));
+  Serial.print(strChannel);
   Serial.print(rf_channel);
   Serial.println();
-  Serial.print(F("Radio speed: "));
+  Serial.print(strRadioSpeed);
   Serial.print(speed_names[rf_speed]);
   Serial.println();
-  Serial.print(F("Radio power: "));
+  Serial.print(strRadioPower);
   Serial.print(power_names[rf_power]);
   Serial.println();
   Serial.print(F("BME280 filter level: "));
   if (pgm_read_byte(&bme_filter_map[bme_filter]) > 0)
   {
     Serial.print(pgm_read_byte(&bme_filter_map[bme_filter]));
-    Serial.print(F("x"));
+    Serial.print('x');
   }
   else
   {
-    Serial.print(F("Disabled"));
+    Serial.print(strDisabled);
   }
   Serial.println();
   Serial.print(F("BME280 temperature oversample: "));
   if (pgm_read_byte(&bme_oversample_map[bme_temp_oversample]) > 0)
   {
     Serial.print(pgm_read_byte(&bme_oversample_map[bme_temp_oversample]));
-    Serial.print(F("x"));
+    Serial.print('x');
   }
   else
   {
-    Serial.print(F("Disabled"));
+    Serial.print(strDisabled);
   }
   Serial.println();
-  Serial.print(F("BME280 humidity oversample: "));
+  Serial.print("BME280 humidity oversample: ");
   if (pgm_read_byte(&bme_oversample_map[bme_hum_oversample]) > 0)
   {
     Serial.print(pgm_read_byte(&bme_oversample_map[bme_hum_oversample]));
-    Serial.print(F("x"));
+    Serial.print('x');
   }
   else
   {
-    Serial.print(F("Disabled"));
+    Serial.print(strDisabled);
   }
   Serial.println();
-  Serial.print(F("Sleep time seconds: "));
+  Serial.print(strSleepTime);
   Serial.print(sleep_8s_count * 8);
   Serial.println();
   Serial.print(F("Status LED: "));
-  Serial.print((status_led_enabled == 1) ? F("Enabled") : F("Disabled"));
+  Serial.print((status_led_enabled == 1) ? strEnabled : strDisabled);
   Serial.println();
   delay(1000);
 }
@@ -545,6 +794,7 @@ void enableADC()
 void enableSPI()
 {
   power_spi_enable();
+  SPCR |= 1 << SPE;
 }
 
 void disableSPI()
@@ -588,7 +838,7 @@ void powerDown()
   disableADC();
 }
 
-ISR (WDT_vect)
+ISR(WDT_vect)
 {
-	wdt_disable();
+  wdt_disable();
 }
