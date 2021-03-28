@@ -47,7 +47,7 @@
 #include <GxEPD2_BW.h>
 #include "Dseg7ClassicBold64.h"
 #include "FreeMonoBoldUpper9Pt7b.h"
-#include "percentFont.h";
+#include "percentFont.h"
 
 #define DISPLAY_CS 7
 #define DISPLAY_DC 8

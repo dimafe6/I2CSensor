@@ -13,14 +13,14 @@ const uint64_t pipes[5] = {0xF0F0F0F0D2LL, 0xF0F0F0F0C3LL, 0xF0F0F0F0B4LL, 0xF0F
 const uint8_t bme_oversample_map[6] PROGMEM = {0, 1, 2, 4, 8, 16};
 const uint8_t bme_filter_map[5] PROGMEM = {0, 2, 4, 8, 16};
 
-const char strNodeId[] = "ID:";
-const char strChannel[] = "Channel:";
-const char strRadioSpeed[] = "Speed:";
-const char strRadioPower[] = "Power:";
-const char strWrongValue[] = "Wrong value!";
-const char strSleepTime[] = "Sleep:";
-const char strEnabled[] = "Enabled";
-const char strDisabled[] = "Disabled";
+const char strNodeId[] PROGMEM = "ID:";
+const char strChannel[] PROGMEM = "Channel:";
+const char strRadioSpeed[] PROGMEM = "Speed:";
+const char strRadioPower[] PROGMEM = "Power:";
+const char strWrongValue[] PROGMEM = "Wrong value!";
+const char strSleepTime[] PROGMEM = "Sleep:";
+const char strEnabled[] PROGMEM = "Enabled";
+const char strDisabled[] PROGMEM = "Disabled";
 
 RF24 radio(RADIO_CE, RADIO_CSN);
 BME280 bme280;
@@ -35,8 +35,6 @@ uint8_t status_led_enabled;
 uint8_t bme_filter;
 uint8_t bme_temp_oversample;
 uint8_t bme_hum_oversample;
-uint16_t battery_min_voltage = BATTERY_MIN_VOLTAGE;
-uint16_t battery_max_voltage = BATTERY_MAX_VOLTAGE;
 signed int prevTemp;
 signed int prevHum;
 uint8_t prevBat;
@@ -170,7 +168,7 @@ void loop()
   if (bme280.begin(0x76, &calibration) == false)
   {
 #ifdef DEBUG
-    Serial.println("Sensor connect failed");
+    Serial.println(F("Sensor connect failed"));
 #endif
 
     data.temperature = 0;
@@ -254,15 +252,21 @@ void loop()
 #if defined(DISPLAY_MODE_FULL_REDRAW)
     if (tempChanged || humChanged || batChanged)
     {
+#ifdef DEBUG
+      display.init(9600);
+#else
       display.init();
-      display.drawPaged(showValuesCallback, 0);
-      display.hibernate();
-      digitalLow(DISPLAY_RST);
+#endif
+      display.drawPaged(showGUICallback, 0);
     }
 #elif defined(DISPLAY_MODE_PARTIAL_REDRAW)
     if (!displayInit || (FULL_REDRAW_AFTER_UPDATES > 0 ? displayUpdatesCount >= FULL_REDRAW_AFTER_UPDATES : false))
     {
+#ifdef DEBUG
+      display.init(9600);
+#else
       display.init();
+#endif
       display.mirror(false);
       display.setRotation(DISPLAY_ROTATION);
       display.drawPaged(showGUICallback, 0);
@@ -295,10 +299,9 @@ void loop()
         displayUpdatesCount++;
       }
     }
-
+#endif
     display.hibernate();
     display.powerOff();
-#endif
 #endif
   }
 
@@ -318,64 +321,6 @@ void loop()
 
 #ifdef ENABLE_DISPLAY
 
-#ifdef DISPLAY_MODE_FULL_REDRAW
-void showValuesCallback(const void *parameters)
-{
-  display.fillScreen(GxEPD_BLACK);
-  display.setTextColor(GxEPD_WHITE);
-  display.mirror(false);
-
-  display.drawRect(0, 0, 200, 200, GxEPD_WHITE);
-  display.drawLine(0, 8, 22, 8, GxEPD_WHITE);
-  display.drawLine(178, 8, 200, 8, GxEPD_WHITE);
-
-  display.setFont(&DSEG7_Classic_Bold_64);
-  display.setCursor(48, 87);
-  display.print((int)(data.temperature / 100));
-
-  display.setCursor(48, 187);
-  display.print((int)(data.humidity / 100));
-
-  display.drawCircle(160, 35, 2, GxEPD_WHITE);
-  display.drawCircle(160, 35, 3, GxEPD_WHITE);
-  display.drawCircle(160, 35, 4, GxEPD_WHITE);
-
-  display.setFont(&FreeMonoBold9pt7b);
-  display.setCursor(39, 15);
-
-  display.print(F("TEMPERATURE"));
-
-  display.setCursor(170, 50);
-  display.print('C');
-
-  display.drawLine(0, 108, 32, 108, GxEPD_WHITE);
-  display.drawLine(168, 108, 200, 108, GxEPD_WHITE);
-
-  display.setCursor(60, 115);
-  display.print(F("HUMIDITY"));
-
-  display.setFont(&percentFont);
-  display.setCursor(160, 145);
-  display.print('%');
-
-  display.drawLine(0, 175, 40, 175, GxEPD_WHITE);
-  display.drawRect(5, 182, 30, 12, GxEPD_WHITE);
-  display.fillRect(35, 185, 2, 6, GxEPD_WHITE);
-  display.fillRect(37, 187, 1, 2, GxEPD_WHITE);
-  display.fillRect(6, 184, (uint8_t)map(data.battery, 0, 100, 3, 28), 8, GxEPD_WHITE);
-  display.drawLine(40, 175, 60, 200, GxEPD_WHITE);
-
-  display.drawLine(160, 175, 200, 175, GxEPD_WHITE);
-  display.setFont(&FreeMonoBold9pt7b);
-  display.setCursor(153, 193);
-  display.print(F("ID:"));
-  display.setCursor(184, 193);
-  display.print(from_node);
-  display.drawLine(160, 175, 140, 200, GxEPD_WHITE);
-}
-#endif
-
-#ifdef DISPLAY_MODE_PARTIAL_REDRAW
 void showGUICallback(const void *parameters)
 {
   display.setTextColor(GxEPD_BLACK);
@@ -430,6 +375,7 @@ void showGUICallback(const void *parameters)
   display.drawLine(160, 175, 150, 200, GxEPD_BLACK);
 }
 
+#ifdef DISPLAY_MODE_PARTIAL_REDRAW
 void showTempBoxCallback(const void *parameters)
 {
   display.setCursor(48, 87);
@@ -718,7 +664,7 @@ void printConfig()
     Serial.print(strDisabled);
   }
   Serial.println();
-  Serial.print("BME280 humidity oversample: ");
+  Serial.print(F("BME280 humidity oversample: "));
   if (pgm_read_byte(&bme_oversample_map[bme_hum_oversample]) > 0)
   {
     Serial.print(pgm_read_byte(&bme_oversample_map[bme_hum_oversample]));
@@ -774,7 +720,7 @@ uint16_t readVcc()
 uint8_t getBatteryPercent()
 {
   float batteryV = readVcc();
-  int batteryPcnt = (((batteryV - battery_min_voltage) / (battery_max_voltage - battery_min_voltage)) * 100);
+  int batteryPcnt = (((batteryV - BATTERY_MIN_VOLTAGE) / (BATTERY_MAX_VOLTAGE - BATTERY_MIN_VOLTAGE)) * 100);
 
   return constrain(batteryPcnt, 0, 100);
 }
