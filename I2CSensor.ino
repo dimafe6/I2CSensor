@@ -13,15 +13,6 @@ const uint64_t pipes[5] = {0xF0F0F0F0D2LL, 0xF0F0F0F0C3LL, 0xF0F0F0F0B4LL, 0xF0F
 const uint8_t bme_oversample_map[6] PROGMEM = {0, 1, 2, 4, 8, 16};
 const uint8_t bme_filter_map[5] PROGMEM = {0, 2, 4, 8, 16};
 
-const char strNodeId[] PROGMEM = "ID:";
-const char strChannel[] PROGMEM = "Channel:";
-const char strRadioSpeed[] PROGMEM = "Speed:";
-const char strRadioPower[] PROGMEM = "Power:";
-const char strWrongValue[] PROGMEM = "Wrong value!";
-const char strSleepTime[] PROGMEM = "Sleep:";
-const char strEnabled[] PROGMEM = "Enabled";
-const char strDisabled[] PROGMEM = "Disabled";
-
 RF24 radio(RADIO_CE, RADIO_CSN);
 BME280 bme280;
 SensorCalibration calibration;
@@ -409,19 +400,19 @@ void showConfigCallback(const void *parameters)
 
   display.println();
 
-  display.print(strNodeId);
+  display.print(F("ID"));
   display.println(from_node);
 
-  display.print(strChannel);
+  display.print(F("Channel:"));
   display.println(rf_channel);
 
-  display.print(strRadioSpeed);
+  display.print(F("Speed:"));
   display.println(speed_names[rf_speed]);
 
-  display.print(strRadioPower);
+  display.print(F("Power:"));
   display.println(power_names[rf_power]);
 
-  display.print(strSleepTime);
+  display.print(F("Sleep:"));
   display.print(sleep_8s_count * 8);
   display.print(F("sec"));
 }
@@ -453,7 +444,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -473,7 +464,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -493,7 +484,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -514,7 +505,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -535,7 +526,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -556,7 +547,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F(""));
     }
   }
 
@@ -577,7 +568,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -599,7 +590,7 @@ void configure()
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -615,12 +606,12 @@ void configure()
     if (status_led_enabled >= 0 && status_led_enabled < 2)
     {
       eeprom_write_byte((uint8_t *)EEPROM_ENABLE_STATUS_LED_ADDRESS, status_led_enabled);
-      Serial.println((status_led_enabled == 1) ? strEnabled : strDisabled);
+      Serial.println((status_led_enabled == 1) ? F("Enabled") : F("Disabled"));
       break;
     }
     else
     {
-      Serial.println(strWrongValue);
+      Serial.println(F("Wrong value!"));
     }
   }
 
@@ -630,16 +621,16 @@ void configure()
 void printConfig()
 {
   Serial.println();
-  Serial.print(strNodeId);
+  Serial.print(F("ID"));
   Serial.print(from_node);
   Serial.println();
-  Serial.print(strChannel);
+  Serial.print(F("Channel:"));
   Serial.print(rf_channel);
   Serial.println();
-  Serial.print(strRadioSpeed);
+  Serial.print(F("Speed:"));
   Serial.print(speed_names[rf_speed]);
   Serial.println();
-  Serial.print(strRadioPower);
+  Serial.print(F("Power:"));
   Serial.print(power_names[rf_power]);
   Serial.println();
   Serial.print(F("BME280 filter level: "));
@@ -650,7 +641,7 @@ void printConfig()
   }
   else
   {
-    Serial.print(strDisabled);
+    Serial.print(F("Disabled"));
   }
   Serial.println();
   Serial.print(F("BME280 temperature oversample: "));
@@ -661,7 +652,7 @@ void printConfig()
   }
   else
   {
-    Serial.print(strDisabled);
+    Serial.print(F("Disabled"));
   }
   Serial.println();
   Serial.print(F("BME280 humidity oversample: "));
@@ -672,14 +663,14 @@ void printConfig()
   }
   else
   {
-    Serial.print(strDisabled);
+    Serial.print(F("Disabled"));
   }
   Serial.println();
-  Serial.print(strSleepTime);
+  Serial.print(F("Sleep:"));
   Serial.print(sleep_8s_count * 8);
   Serial.println();
   Serial.print(F("Status LED: "));
-  Serial.print((status_led_enabled == 1) ? strEnabled : strDisabled);
+  Serial.print((status_led_enabled == 1) ? F("Enabled") : F("Disabled"));
   Serial.println();
   delay(1000);
 }
