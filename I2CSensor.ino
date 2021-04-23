@@ -17,18 +17,21 @@ RF24 radio(RADIO_CE, RADIO_CSN);
 BME280 bme280;
 SensorCalibration calibration;
 
+#ifndef HARDWARE_VERSION_V3
+signed int prevTemp;
+signed int prevHum;
+uint8_t prevBat;
+#endif
+
 uint8_t from_node;
 uint8_t rf_channel;
 uint8_t rf_speed;
 uint8_t rf_power;
-uint8_t sleep_8s_count;
 uint8_t status_led_enabled;
 uint8_t bme_filter;
 uint8_t bme_temp_oversample;
 uint8_t bme_hum_oversample;
-signed int prevTemp;
-signed int prevHum;
-uint8_t prevBat;
+uint8_t sleep_8s_count;
 
 #ifdef DISPLAY_MODE_PARTIAL_REDRAW
 bool displayInit = false;
@@ -46,6 +49,11 @@ ExternalSensor data;
 
 void setup()
 {
+#ifdef HARDWARE_VERSION_V3
+  pinAsOutput(TPL_DONE_PIN);
+  digitalLow(TPL_DONE_PIN);
+#endif
+
   disableADC();
   disableSPI();
   disableTWI();
@@ -145,7 +153,9 @@ void loop()
 #endif
 
   enableADC();
+#ifndef HARDWARE_VERSION_V3
   prevBat = data.battery;
+#endif
   data.battery = getBatteryPercent();
   disableADC();
 
@@ -191,8 +201,10 @@ void loop()
       delay(1);
     };
 
+#ifndef HARDWARE_VERSION_V3
     prevTemp = (int)(data.temperature / 100);
     prevHum = (int)(data.humidity / 100);
+#endif
 
     data.temperature = bme280.readTempC() * 100;
     data.humidity = bme280.readFloatHumidity() * 100;
@@ -303,11 +315,7 @@ void loop()
   delay(1000); // Delay for complete Serial write
 #endif
 
-  unsigned int sleepCounter;
-  for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
-  {
-    powerDown();
-  }
+  powerDown();
 }
 
 #ifdef ENABLE_DISPLAY
@@ -753,29 +761,37 @@ void disableTWI()
   digitalLow(SCL);
 }
 
-void powerDown()
-{
-  disableADC();
-
-  wdt_enable(WDTO_8S);
-  WDTCSR |= (1 << WDIE);
-
-  do
-  {
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);
-    cli();
-    sleep_enable();
-    sleep_bod_disable();
-    sei();
-    sleep_cpu();
-    sleep_disable();
-    sei();
-  } while (0);
-
-  disableADC();
-}
-
+#ifndef HARDWARE_VERSION_V3
 ISR(WDT_vect)
 {
   wdt_disable();
+}
+#endif
+
+void powerDown()
+{
+  digitalHigh(TPL_DONE_PIN);
+
+  unsigned int sleepCounter;
+  for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
+  {
+    disableADC();
+
+    wdt_enable(WDTO_8S);
+    WDTCSR |= (1 << WDIE);
+
+    do
+    {
+      set_sleep_mode(SLEEP_MODE_PWR_DOWN);
+      cli();
+      sleep_enable();
+      sleep_bod_disable();
+      sei();
+      sleep_cpu();
+      sleep_disable();
+      sei();
+    } while (0);
+
+    disableADC();
+  }
 }
