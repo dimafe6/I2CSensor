@@ -21,6 +21,7 @@ SensorCalibration calibration;
 signed int prevTemp;
 signed int prevHum;
 uint8_t prevBat;
+uint8_t sleep_8s_count;
 #endif
 
 uint8_t from_node;
@@ -31,7 +32,6 @@ uint8_t status_led_enabled;
 uint8_t bme_filter;
 uint8_t bme_temp_oversample;
 uint8_t bme_hum_oversample;
-uint8_t sleep_8s_count;
 
 #ifdef DISPLAY_MODE_PARTIAL_REDRAW
 bool displayInit = false;
@@ -52,11 +52,11 @@ void setup()
 #ifdef HARDWARE_VERSION_V3
   pinAsOutput(TPL_DONE_PIN);
   digitalLow(TPL_DONE_PIN);
-#endif
-
+#else
   disableADC();
   disableSPI();
   disableTWI();
+#endif
 
   pinAsInputPullUp(PROG_PIN);
   pinAsOutput(RF_PWR);
@@ -72,7 +72,9 @@ void setup()
   rf_channel = eeprom_read_byte((uint8_t *)EEPROM_CHANNEL_ADDRESS);
   rf_speed = eeprom_read_byte((uint8_t *)EEPROM_SPEED_ADDRESS);
   rf_power = eeprom_read_byte((uint8_t *)EEPROM_POWER_ADDRESS);
+#ifndef HARDWARE_VERSION_V3
   sleep_8s_count = eeprom_read_byte((uint8_t *)EEPROM_SLEEP_TIME_ADDRESS);
+#endif
   status_led_enabled = eeprom_read_byte((uint8_t *)EEPROM_ENABLE_STATUS_LED_ADDRESS);
   bme_filter = eeprom_read_byte((uint8_t *)EEPROM_BME_FILTER_ADDRESS);
   bme_temp_oversample = eeprom_read_byte((uint8_t *)EEPROM_BME_TEMP_OVERSAMPLE_ADDRESS);
@@ -82,7 +84,9 @@ void setup()
                        (rf_channel >= 1 && rf_channel <= 125) &&
                        (rf_speed >= 0 && rf_speed <= 2) &&
                        (rf_power >= 0 && rf_speed <= 3) &&
+#ifndef HARDWARE_VERSION_V3
                        (sleep_8s_count >= 1 && sleep_8s_count <= 432000) &&
+#endif
                        (bme_filter >= 0 && bme_filter <= 4) &&
                        (bme_temp_oversample >= 0 && bme_temp_oversample <= 5) &&
                        (bme_hum_oversample >= 0 && bme_hum_oversample <= 5);
@@ -97,7 +101,9 @@ void setup()
     rf_channel = 80;
     rf_speed = 2;
     rf_power = 3;
+#ifndef HARDWARE_VERSION_V3
     sleep_8s_count = 1;
+#endif
     status_led_enabled = 1;
     bme_filter = 2;
     bme_temp_oversample = 2;
@@ -152,12 +158,14 @@ void loop()
   unsigned long startTime = millis();
 #endif
 
-  enableADC();
 #ifndef HARDWARE_VERSION_V3
+  enableADC();
   prevBat = data.battery;
 #endif
   data.battery = getBatteryPercent();
+#ifndef HARDWARE_VERSION_V3
   disableADC();
+#endif
 
   enableStatusLED();
 
@@ -420,9 +428,11 @@ void showConfigCallback(const void *parameters)
   display.print(F("Power:"));
   display.println(power_names[rf_power]);
 
+#ifndef HARDWARE_VERSION_V3
   display.print(F("Sleep:"));
   display.print(sleep_8s_count * 8);
   display.print(F("sec"));
+#endif
 }
 
 #endif
@@ -588,7 +598,7 @@ void configure()
       ;
 
     int sleep_time = Serial.readStringUntil('\n').toInt();
-
+#ifndef HARDWARE_VERSION_V3
     if (sleep_time >= 8 && sleep_time <= 432000 && (sleep_time % 8) == 0)
     {
       sleep_8s_count = sleep_time / 8;
@@ -600,6 +610,7 @@ void configure()
     {
       Serial.println(F("Wrong value!"));
     }
+#endif
   }
 
   while (1)
@@ -673,6 +684,7 @@ void printConfig()
   {
     Serial.print(F("Disabled"));
   }
+#ifndef HARDWARE_VERSION_V3
   Serial.println();
   Serial.print(F("Sleep:"));
   Serial.print(sleep_8s_count * 8);
@@ -680,6 +692,7 @@ void printConfig()
   Serial.print(F("Status LED: "));
   Serial.print((status_led_enabled == 1) ? F("Enabled") : F("Disabled"));
   Serial.println();
+#endif
   delay(1000);
 }
 
@@ -770,8 +783,15 @@ ISR(WDT_vect)
 
 void powerDown()
 {
-  digitalHigh(TPL_DONE_PIN);
-
+#ifdef HARDWARE_VERSION_V3
+  while (1)
+  {
+    digitalHigh(TPL_DONE_PIN);
+    delayMicroseconds(1);
+    digitalLow(TPL_DONE_PIN);
+    delayMicroseconds(1);
+  }
+#else
   unsigned int sleepCounter;
   for (sleepCounter = sleep_8s_count; sleepCounter > 0; sleepCounter--)
   {
@@ -791,7 +811,7 @@ void powerDown()
       sleep_disable();
       sei();
     } while (0);
-
     disableADC();
   }
+#endif
 }

@@ -1,7 +1,7 @@
 #ifndef __CONFIG_H__
 #define __CONFIG_H__
 
-#define DEBUG
+//#define DEBUG
 
 /** Select one **/
 #define HARDWARE_VERSION_V3 // Version with TPL5111 timer
@@ -10,7 +10,9 @@
 
 #ifdef HARDWARE_VERSION_V3
 #define TPL_DONE_PIN A0
-#elif HARDWARE_VERSION_V4
+#endif
+
+#ifdef HARDWARE_VERSION_V4
 #define ENABLE_DISPLAY
 
 /** Select one **/
