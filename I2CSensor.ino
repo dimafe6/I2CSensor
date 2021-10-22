@@ -52,11 +52,13 @@ void setup()
 #ifdef HARDWARE_VERSION_V3
   pinAsOutput(TPL_DONE_PIN);
   digitalLow(TPL_DONE_PIN);
-#else
+#endif
+  radio.begin();
+  radio.powerDown();
+
   disableADC();
   disableSPI();
   disableTWI();
-#endif
 
   pinAsInputPullUp(PROG_PIN);
   pinAsOutput(RF_PWR);
@@ -202,11 +204,13 @@ void loop()
     bme280.setFilter(pgm_read_byte(&bme_filter_map[bme_filter]));
     bme280.setTempOverSample(pgm_read_byte(&bme_oversample_map[bme_temp_oversample]));
     bme280.setHumidityOverSample(pgm_read_byte(&bme_oversample_map[bme_hum_oversample]));
-    bme280.setMode(MODE_FORCED);
+    bme280.setMode(MODE_NORMAL);
 
-    while (bme280.isMeasuring())
+    uint8_t measurementCount = 0;
+    while (bme280.isMeasuring() && measurementCount <= 10)
     {
       delay(1);
+      measurementCount++;
     };
 
 #ifndef HARDWARE_VERSION_V3
@@ -223,7 +227,6 @@ void loop()
     enableSPI();
     digitalHigh(RF_PWR);
 
-    radio.begin();
     radio.powerUp();
     radio.stopListening();
     radio.setAutoAck(false);
@@ -231,7 +234,7 @@ void loop()
     radio.setPayloadSize(sizeof(data));
     radio.setPALevel(rf24_pa_dbm_e(rf_power));
     radio.setDataRate(rf24_datarate_e(rf_speed));
-    radio.disableCRC();
+    //radio.disableCRC();
     radio.openWritingPipe(pipes[from_node - 1]);
 
     radio.write(&data, sizeof(data));
@@ -589,7 +592,7 @@ void configure()
       Serial.println(F("Wrong value!"));
     }
   }
-
+#ifndef HARDWARE_VERSION_V3
   while (1)
   {
     Serial.println(F("*** Enter sleep time in seconds that is divisible by 8:"));
@@ -598,7 +601,7 @@ void configure()
       ;
 
     int sleep_time = Serial.readStringUntil('\n').toInt();
-#ifndef HARDWARE_VERSION_V3
+
     if (sleep_time >= 8 && sleep_time <= 432000 && (sleep_time % 8) == 0)
     {
       sleep_8s_count = sleep_time / 8;
@@ -610,8 +613,8 @@ void configure()
     {
       Serial.println(F("Wrong value!"));
     }
-#endif
   }
+#endif
 
   while (1)
   {
@@ -640,7 +643,7 @@ void configure()
 void printConfig()
 {
   Serial.println();
-  Serial.print(F("ID"));
+  Serial.print(F("ID:"));
   Serial.print(from_node);
   Serial.println();
   Serial.print(F("Channel:"));
